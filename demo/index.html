@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AICC-Lite | 智能联络中心 在线 Demo</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2280%22>📞</text></svg>"/>
+    <link rel="stylesheet" href="../frontend/styles.css">
+    <style>
+        /* Demo-specific banner */
+        .demo-banner {
+            background: linear-gradient(90deg, #6d28d9, #db2777);
+            color: white;
+            padding: 8px 24px;
+            text-align: center;
+            font-size: 13px;
+        }
+        .demo-banner a { color: white; text-decoration: underline; }
+        .demo-banner strong { font-weight: 600; }
+    </style>
+    <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+</head>
+<body>
+    <div class="demo-banner">
+        🎭 <strong>独立演示模式</strong> - 数据存储在浏览器 LocalStorage,无需后端,刷新可保留 |
+        <a href="https://github.com/" target="_blank">查看完整源码与本地部署文档</a>
+    </div>
+    <div id="app">
+        <!-- Same template, see frontend/index.html for full content -->
+        <header class="app-header">
+            <div class="brand">
+                <span class="logo">📞</span>
+                <h1>AICC-Lite</h1>
+                <span class="tagline">新代际 AI 联络中心 · Demo</span>
+            </div>
+            <div class="header-actions">
+                <span class="status-indicator offline">
+                    <span class="dot"></span>
+                    独立演示模式 (Mock)
+                </span>
+                <button class="btn btn-ghost" @click="resetDemo">重置 Demo</button>
+            </div>
+        </header>
+
+        <nav class="scenario-nav">
+            <button v-for="s in scenarios" :key="s.id"
+                    class="scenario-btn" :class="{active: currentScenario === s.id}"
+                    @click="switchScenario(s.id)">
+                <span class="scenario-icon">{{ s.icon }}</span>
+                <div class="scenario-info">
+                    <strong>{{ s.title }}</strong>
+                    <small>{{ s.subtitle }}</small>
+                </div>
+            </button>
+        </nav>
+
+        <main class="workspace">
+            <aside class="conv-list-panel">
+                <div class="panel-header">
+                    <h3>会话列表</h3>
+                    <button class="btn btn-primary btn-sm" @click="startScenario">
+                        <span>＋</span> 新建呼入
+                    </button>
+                </div>
+                <div class="conv-list">
+                    <div v-if="conversations.length === 0" class="empty-state">
+                        <p>暂无会话</p>
+                        <p class="hint">点击"新建呼入"开始体验</p>
+                    </div>
+                    <div v-for="c in conversations" :key="c.id"
+                         class="conv-item" :class="{active: currentConvId === c.id}"
+                         @click="selectConv(c.id)">
+                        <div class="conv-avatar">{{ c.contact?.name?.[0] || '?' }}</div>
+                        <div class="conv-meta">
+                            <div class="conv-row">
+                                <strong>{{ c.contact?.name || '未知' }}</strong>
+                                <span class="status-pill" :class="'status-' + c.status">{{ statusLabel(c.status) }}</span>
+                            </div>
+                            <div class="conv-row">
+                                <span class="phone">{{ c.contact?.phone }}</span>
+                                <span class="scenario-tag">{{ c.scenario_id?.toUpperCase() }}</span>
+                            </div>
+                            <div class="conv-last">{{ c.last_message || '暂无消息' }}</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="conv-main">
+                <div v-if="!currentConv" class="empty-conv">
+                    <div class="empty-illu">📞</div>
+                    <h2>欢迎使用 AICC-Lite</h2>
+                    <p>选择场景，体验新代际 AI 联络中心的 4 大差异化能力</p>
+                    <div class="scenario-cards">
+                        <div v-for="s in scenarios" :key="s.id" class="scenario-card"
+                             @click="switchScenario(s.id); startScenario()">
+                            <span class="big-icon">{{ s.icon }}</span>
+                            <h4>{{ s.title }}</h4>
+                            <p>{{ s.description }}</p>
+                            <strong class="capability">{{ s.capability }}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-else class="conv-content">
+                    <div class="conv-header">
+                        <div class="conv-info">
+                            <h3>{{ currentConv.contact?.name }}</h3>
+                            <span class="phone">📱 {{ currentConv.contact?.phone }}</span>
+                            <span class="status-pill" :class="'status-' + currentConv.status">{{ statusLabel(currentConv.status) }}</span>
+                            <span v-if="currentConv.scenario_id" class="scenario-pill">{{ scenarioTitle(currentConv.scenario_id) }}</span>
+                        </div>
+                        <div class="conv-actions">
+                            <button v-if="currentConv.status === 'pending'" class="btn btn-success btn-sm" @click="acceptCall">📞 接听</button>
+                            <button v-if="currentConv.status === 'open'" class="btn btn-warn btn-sm" @click="resolve">✓ 结束</button>
+                        </div>
+                    </div>
+
+                    <div class="messages" ref="msgList">
+                        <div v-for="m in currentConv.messages" :key="m.id" class="msg-row" :class="msgClass(m)">
+                            <div v-if="m.message_type === 2" class="msg-activity">
+                                <span class="activity-text">{{ m.content }}</span>
+                                <span class="time">{{ formatTime(m.created_at) }}</span>
+                            </div>
+                            <div v-else class="msg-bubble" :class="bubbleClass(m)">
+                                <div class="msg-meta">
+                                    <strong>{{ senderName(m) }}</strong>
+                                    <span class="time">{{ formatTime(m.created_at) }}</span>
+                                </div>
+                                <div class="msg-text">{{ m.content }}</div>
+                            </div>
+                        </div>
+                        <div v-if="aiTyping" class="msg-bubble bubble-ai typing-indicator">
+                            <strong>AI 助手</strong>
+                            <span class="dot-flash"></span><span class="dot-flash"></span><span class="dot-flash"></span>
+                        </div>
+                    </div>
+
+                    <div v-if="currentConv.scenario_id === 's4'" class="translate-panel">
+                        <div class="translate-header">
+                            <strong>🌐 双向翻译桥</strong>
+                            <span class="latency">延迟: STT 600ms / 翻译 500ms / TTS 800ms</span>
+                        </div>
+                        <div class="translate-controls">
+                            <button class="btn btn-small" @click="playTranslateDialog(0)" :disabled="translatePlaying">
+                                ▶ 播放预设对话(中→英 4 轮)
+                            </button>
+                            <input v-model="translateInput" placeholder="输入文本进行翻译..." @keyup.enter="customTranslate"/>
+                            <select v-model="translateDir">
+                                <option value="zh-en">中 → 英</option>
+                                <option value="en-zh">英 → 中</option>
+                            </select>
+                            <button class="btn btn-small" @click="customTranslate">翻译</button>
+                        </div>
+                    </div>
+
+                    <div class="msg-input-row">
+                        <input v-model="msgInput" placeholder="作为客户输入消息(中文)..."
+                               @keyup.enter="sendCustomerMsg" class="msg-input" />
+                        <button class="btn btn-primary" @click="sendCustomerMsg" :disabled="!msgInput || aiTyping">发送</button>
+                        <button class="btn btn-ghost" @click="triggerVoiceInput" title="语音输入">🎤</button>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="insight-panel">
+                <div class="panel-header"><h3>🤖 AI 智能助手</h3></div>
+                <div v-if="!currentConv" class="empty-state"><p>请选择一个会话</p></div>
+                <div v-else class="insight-content">
+                    <div class="insight-card">
+                        <h4>👤 客户画像</h4>
+                        <div v-if="currentConv.contact" class="profile-grid">
+                            <div><span class="label">姓名</span><strong>{{ currentConv.contact.name }}</strong></div>
+                            <div><span class="label">手机</span><strong>{{ currentConv.contact.phone }}</strong></div>
+                            <div v-if="currentConv.contact.custom_attributes?.tier">
+                                <span class="label">等级</span><strong>{{ tierLabel(currentConv.contact.custom_attributes.tier) }}</strong>
+                            </div>
+                            <div v-if="currentConv.contact.custom_attributes?.current_plan">
+                                <span class="label">当前套餐</span><strong>{{ planLabel(currentConv.contact.custom_attributes.current_plan) }}</strong>
+                            </div>
+                            <div v-if="currentConv.contact.custom_attributes?.registration_date">
+                                <span class="label">注册时间</span><strong>{{ currentConv.contact.custom_attributes.registration_date }}</strong>
+                            </div>
+                        </div>
+                        <div class="tags" v-if="currentConv.contact?.custom_attributes?.tags">
+                            <span v-for="t in currentConv.contact.custom_attributes.tags" class="tag">{{ t }}</span>
+                        </div>
+                    </div>
+
+                    <div v-if="scenarioData" class="insight-card scenario-insight">
+                        <h4>{{ scenarioInsightTitle() }}</h4>
+
+                        <div v-if="currentConv.scenario_id === 's1' && scenarioData.diagnosis">
+                            <div class="metric-row">
+                                <div class="metric-card warn">
+                                    <span class="metric-label">基站负载</span>
+                                    <strong class="metric-value">{{ scenarioData.diagnosis.load_percent }}%</strong>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">信号强度</span>
+                                    <strong class="metric-value">{{ scenarioData.diagnosis.signal_strength_dbm }} dBm</strong>
+                                </div>
+                            </div>
+                            <div class="metric-row">
+                                <div class="metric-card">
+                                    <span class="metric-label">基站</span>
+                                    <strong class="metric-value">{{ scenarioData.diagnosis.base_station }}</strong>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">受影响用户</span>
+                                    <strong class="metric-value">{{ scenarioData.diagnosis.neighboring_users_affected }}人</strong>
+                                </div>
+                            </div>
+                            <div v-if="scenarioData.actions" class="action-list">
+                                <h5>已自动执行</h5>
+                                <div v-for="a in scenarioData.actions" class="action-item">
+                                    <span class="check">✓</span>
+                                    <strong>{{ toolLabel(a.tool) }}</strong>
+                                    <span v-if="a.result?.ticket_id">: {{ a.result.ticket_id }}</span>
+                                    <span v-if="a.result?.data_gb">: {{ a.result.data_gb }}G 流量包</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="currentConv.scenario_id === 's2' && scenarioData.usage">
+                            <h5>用户实际使用</h5>
+                            <div class="metric-row">
+                                <div class="metric-card">
+                                    <span class="metric-label">月均流量</span>
+                                    <strong class="metric-value">{{ scenarioData.usage.monthly_data_gb }}G</strong>
+                                </div>
+                                <div class="metric-card">
+                                    <span class="metric-label">月均通话</span>
+                                    <strong class="metric-value">{{ scenarioData.usage.monthly_voice_minutes }}分钟</strong>
+                                </div>
+                            </div>
+                            <div v-if="scenarioData.cost_analysis" class="cost-detail">
+                                <h5>降到199套餐实际花费(Tool 算)</h5>
+                                <div class="cost-row">
+                                    <span>基础套餐</span><strong>¥{{ scenarioData.cost_analysis.base_cost }}</strong>
+                                </div>
+                                <div class="cost-row warn">
+                                    <span>流量超额 ({{ scenarioData.cost_analysis.data_overage_gb }}G × ¥{{ scenarioData.cost_analysis.data_overage_per_gb }})</span>
+                                    <strong>¥{{ scenarioData.cost_analysis.data_overage_cost }}</strong>
+                                </div>
+                                <div class="cost-row warn">
+                                    <span>通话超额 ({{ scenarioData.cost_analysis.voice_overage_min }}分 × ¥{{ scenarioData.cost_analysis.voice_overage_per_min }})</span>
+                                    <strong>¥{{ scenarioData.cost_analysis.voice_overage_cost }}</strong>
+                                </div>
+                                <div class="cost-row total">
+                                    <span>实际月费</span><strong>¥{{ scenarioData.cost_analysis.total }}</strong>
+                                </div>
+                                <div class="vs-current">
+                                    💡 客户以为199元就够,实际<strong>¥{{ scenarioData.cost_analysis.total }}</strong>,只省<strong>¥{{ Math.abs(scenarioData.cost_analysis.vs_current) }}</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="currentConv.scenario_id === 's3' && scenarioData.complaint_context">
+                            <div class="alert alert-danger">
+                                <strong>⚠️ 投诉风险</strong>
+                                <p>情绪评分: {{ scenarioData.complaint_context.sentiment_score }}/10 (低)</p>
+                            </div>
+                            <h5>历史工单</h5>
+                            <div v-for="c in scenarioData.complaint_context.previous_complaints" class="ticket-item">
+                                <strong>{{ c.ticket_id }}</strong>
+                                <p>{{ c.issue }}</p>
+                                <span class="status-pill status-resolved">实际未解决</span>
+                            </div>
+                            <h5 class="mt">建议处理流程</h5>
+                            <ol class="suggestion-list">
+                                <li v-for="step in scenarioData.complaint_context.suggested_agent_response_template">{{ step }}</li>
+                            </ol>
+                        </div>
+
+                        <div v-if="currentConv.scenario_id === 's4' && scenarioData.callee">
+                            <h5>📞 通话对端</h5>
+                            <div class="profile-grid">
+                                <div><span class="label">姓名</span><strong>{{ scenarioData.callee.name }}</strong></div>
+                                <div><span class="label">公司</span><strong>{{ scenarioData.callee.company }}</strong></div>
+                                <div><span class="label">国家</span><strong>{{ scenarioData.callee.country }}</strong></div>
+                                <div><span class="label">语言</span><strong>{{ scenarioData.callee.language?.toUpperCase() }}</strong></div>
+                            </div>
+                            <h5 class="mt">话题: {{ scenarioData.context }}</h5>
+                        </div>
+                    </div>
+
+                    <div v-if="suggestions.length > 0" class="insight-card captain-card">
+                        <h4>💡 AI 建议话术</h4>
+                        <div v-for="s in suggestions" class="suggestion" @click="useSuggestion(s)">
+                            <span>{{ s }}</span>
+                            <button class="copy-btn">使用</button>
+                        </div>
+                    </div>
+
+                    <div class="insight-card">
+                        <h4>🎮 操作面板</h4>
+                        <button class="btn btn-block btn-primary" @click="generateAIReply" :disabled="aiTyping">🤖 让 AI 回复</button>
+                        <button class="btn btn-block btn-warn" @click="triggerHandoff" :disabled="currentConv.status !== 'pending'">🆘 转人工</button>
+                        <button class="btn btn-block" @click="loadCaptainSuggest">✨ 刷新 AI 建议</button>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <div v-if="toast" class="toast" :class="'toast-' + toast.type">{{ toast.text }}</div>
+    </div>
+
+    <script>
+        // 强制使用 standalone mock 模式
+        window.AICC_FORCE_STANDALONE = true;
+    </script>
+    <script src="../frontend/mock-backend.js"></script>
+    <script src="../frontend/app.js"></script>
+</body>
+</html>

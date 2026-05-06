@@ -1,0 +1,51 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          # Copy demo to site root
+          cp -r demo/* _site/
+          # Copy frontend (referenced by demo via ../frontend/)
+          cp -r frontend _site/frontend
+          # Update demo's relative paths to direct paths
+          sed -i 's|\.\./frontend/||g' _site/index.html
+          # Add favicon
+          cat > _site/.nojekyll <<'EOF'
+EOF
+          ls -la _site/
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

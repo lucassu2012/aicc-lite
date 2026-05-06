@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Smoke test imports
+        run: |
+          cd backend
+          python -c "from app.main import app; print('OK: app imports')"
+          python -c "from app.flows import executor; print('OK: flows OK')"
+          python -c "from app.mocks import calculate_actual_cost; r = calculate_actual_cost('199_basic', 68, 480); assert r['total'] == 340.0, r; print('OK: cost calc correct:', r['total'])"
+
+      - name: Start server and test endpoints
+        run: |
+          cd backend
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          SERVER_PID=$!
+          sleep 5
+          curl -f http://127.0.0.1:8000/api/health
+          curl -f -X POST "http://127.0.0.1:8000/api/v1/scenarios/s1/trigger?phone=13812345678" | grep "张先生"
+          curl -f -X POST "http://127.0.0.1:8000/api/v1/scenarios/s2/trigger?phone=13812345678" | grep "cost_analysis"
+          kill $SERVER_PID || true
+          echo "All endpoints responded successfully"
