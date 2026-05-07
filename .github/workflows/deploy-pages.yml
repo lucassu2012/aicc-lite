@@ -31,7 +31,9 @@ jobs:
         run: |
           mkdir -p _site
           cp -r demo/* _site/
-          cp -r frontend _site/frontend
+          cp frontend/styles.css _site/styles.css
+          cp frontend/app.js _site/app.js
+          cp frontend/mock-backend.js _site/mock-backend.js
           sed -i 's|\.\./frontend/||g' _site/index.html
           touch _site/.nojekyll
           ls -la _site/
